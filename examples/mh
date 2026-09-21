@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIG="${CONFIG:-$ROOT/.env}"
+if [[ -f "$CONFIG" ]]; then set -a; source "$CONFIG"; set +a; fi
+
+: "${BENCH_ROOT:?Set BENCH_ROOT in .env}"
+: "${REFERENCE_BENCH:?Set REFERENCE_BENCH in .env}"
+: "${REFERENCE_SITE:?Set REFERENCE_SITE in .env}"
+: "${REGISTRY_PATH:?Set REGISTRY_PATH in .env}"
+
+die() { echo "error: $*" >&2; exit 1; }
+guard_name() { [[ "$1" != "$REFERENCE_SITE" ]] || die "reference site is protected"; }
+usage() { echo "usage: mh doctor | new NAME [--dry-run] | list | testplan NAME --output FILE | teardown NAME [--dry-run]"; }
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  doctor)
+    [[ -d "$REFERENCE_BENCH" ]] || die "reference bench missing: $REFERENCE_BENCH"
+    command -v bench >/dev/null || die "bench is not on PATH"
+    command -v flock >/dev/null || die "flock is required for registry locking"
+    [[ "$REFERENCE_BENCH" != "$BENCH_ROOT"/* ]] || true
+    echo "native bench host is ready"
+    echo "reference: $REFERENCE_BENCH / $REFERENCE_SITE"
+    ;;
+  list)
+    [[ -f "$REGISTRY_PATH" ]] && cat "$REGISTRY_PATH" || echo '{"version":1,"benches":[]}'
+    ;;
+  new)
+    name="${1:-}"; shift || true; [[ -n "$name" ]] || { usage; exit 2; }
+    dry=0; [[ "${1:-}" == "--dry-run" ]] && dry=1
+    [[ "$name" =~ ^[a-z0-9][a-z0-9-]{1,50}$ ]] || die "invalid bench name: use lowercase letters, digits, and hyphens"
+    bench_path="$BENCH_ROOT/$name"; site="${DISPOSABLE_PREFIX:-mh}-$name.local"
+    guard_name "$site"; [[ "$bench_path" != "$REFERENCE_BENCH" ]] || die "reference bench is protected"
+    if ((dry)); then echo "would provision $bench_path with site $site"; exit 0; fi
+    mkdir -p "$(dirname "$REGISTRY_PATH")" "$bench_path"
+    echo "provisioning template: copy a native seed into $bench_path, create $site, restore data, set unique Redis/port values, then migrate only $site"
+    ;;
+  testplan)
+    name="${1:-}"; shift || true; [[ "${1:-}" == "--output" ]] || { usage; exit 2; }; shift; out="${1:-testplan.md}"
+    cat > "$out" <<EOF
+# Test plan: $name
+
+Bench: $BENCH_ROOT/$name
+Site: ${DISPOSABLE_PREFIX:-mh}-$name.local
+
+## Automated tests
+
+- [ ] Focused unit tests
+- [ ] Site tests
+- [ ] HTTP/API smoke tests
+- [ ] Manual browser verification through an SSH tunnel
+- [ ] Teardown and reference-site health check
+EOF
+    ;;
+  teardown)
+    name="${1:-}"; shift || true; [[ -n "$name" ]] || { usage; exit 2; }
+    dry=0; [[ "${1:-}" == "--dry-run" ]] && dry=1
+    bench_path="$BENCH_ROOT/$name"; [[ "$bench_path" != "$REFERENCE_BENCH" ]] || die "refusing reference teardown"
+    if ((dry)); then echo "would tear down only $bench_path"; exit 0; fi
+    die "teardown requires an operator-reviewed site/database command; use the exact registry record and chain cleanup with &&"
+    ;;
+  *) usage; exit 2 ;;
+esac
