@@ -31,7 +31,7 @@ Run focused unit tests first, then site tests, then HTTP smoke checks. Start a t
 bench --site <disposable-site> serve --port <allocated-port> --noreload
 ```
 
-Bind it to localhost only. Build a frontend against the temporary same-origin URL, then use an SSH tunnel for manual browser verification. Record commands, counts, logs, data identifiers, and baseline failures; written tests are not evidence of execution.
+Bind it to localhost only. Build a frontend against the temporary same-origin URL. If the native copy did not create the normal asset setup, recreate `sites/assets/<app>` links to each app's Python `public` directory and copy the reference `assets.json`/`assets-rtl.json`; without those manifests, Frappe's `/login` renderer can fail with a null bundled-asset map. Then use an SSH tunnel for manual browser verification. Record commands, counts, logs, data identifiers, and baseline failures; written tests are not evidence of execution.
 
 ## Teardown
 
